@@ -1,0 +1,800 @@
+---
+title: "DA 101 Final Project"
+author: "Ichhit Joshi"
+date: "05/04/2022"
+output: 
+  html_document:
+    code_folding: hide
+    theme: darkly
+    toc: true
+    toc_float:
+      collapsed: true
+      smooth_scroll: true
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+### Analyzing the Spotify Global Top 200 Weekly Charts
+
+**Data sources:** 
+
+<a href="https://spotifycharts.com/regional/global/weekly/latest">Spotify Charts</a>
+
+<a href="https://developer.spotify.com/documentation/web-api/reference/#/operations/get-track">Spotify Audio Features</a>
+
+<a href="https://www.rcharlie.com/spotifyr/">spotifyr R-Wrapper</a>
+
+**Size of the dataset:** 9,500,447 bytes  (9.5 MB on disk)
+
+---
+
+#### **To download the final dataset** : <a href="https://drive.google.com/file/d/1q8SXbQqOlPtYsDPg4G9uFjiLtsHfuaXH/view?usp=sharing">*Click Here*</a>
+
+#### **To build the dataset from scratch (279 CSV files)** : <a href="https://drive.google.com/drive/folders/12VMQKxITYiTi7ksvPJTGdsWcPz_CkNCI?usp=sharing">*Click Here*</a>
+
+#### **To view the final dataset** : <a class="button stroke smoothscroll" href="#dataset" title="">*Click Here*</a>
+
+---
+
+```{r Initial Setup, message=FALSE, warning=FALSE, include=FALSE}
+#load required libraries
+library(dplyr)
+library(spotifyr)
+library(tidyverse)
+library(knitr)
+library(plyr)                                    
+library(readr)  
+library(purrr)
+library(ggplot2)
+library(gt)
+library(MASS)
+library(GGally)
+library(pander)
+library(dotenv)
+
+load_dot_env()
+
+Sys.setenv(SPOTIFY_CLIENT_ID = Sys.getenv("ID"))
+Sys.setenv(SPOTIFY_CLIENT_SECRET = Sys.getenv("SECRET"))
+
+#get access token from spotify
+access_token <- get_spotify_access_token()
+```
+
+```{r Data Wrangling from Scratch, eval=FALSE, message=FALSE, warning=FALSE, include=FALSE}
+
+#DATA WRANGLING FROM SCRATCH
+
+#change r eval to TRUE only if you want to build the whole dataset from scratch (will take about 10 minutes to finish)
+
+#get list of csv files to read from the csv directory
+files_to_read <- list.files(path = "/Users/ichhit/Documents/DENISON/SEM 2/DA 101-02/LABS/FINAL_PROJECT/CSV", 
+                       pattern = "*.csv", full.names = TRUE)
+
+#load all the csv files into one table
+spotify_charts_weekly_top_200 <- map_dfr(files_to_read, ~ read.csv(file = .x,
+         skip = 2, # Number of lines you want to skip when you read it
+         header = FALSE, # Skip the header
+         col.names = c("Position", "Track_Name", "Artist_Name","Streams", "id"), # Set your own column names
+         stringsAsFactors = FALSE
+)) 
+
+#function to number the weeks
+rep6 <-function(d){
+ d$Week =  rep(1:ceiling(nrow(d)/200), each = 200)[1:nrow(d)]
+ d
+}
+
+#add Weeks variable
+spotify_charts_weekly_top_200 <- spotify_charts_weekly_top_200 %>% group_modify(~rep6(.))  
+
+#modify the URL to get just the Song ID
+spotify_charts_weekly_top_200 <- spotify_charts_weekly_top_200 %>% mutate(id = str_sub(id, -22))
+
+#rename week from filename
+spotify_charts_weekly_top_200 <- spotify_charts_weekly_top_200 %>% mutate(start_date = "none", end_date = "none", year = 0)
+
+a <- 1
+for(i in files_to_read){
+  filename <- sub('\\..*$', '', basename(i))
+  test_str <- str_split(filename,"regional-global-weekly-")
+  date_range <- str_split(test_str[[1]][2],"--")
+  start_date <- date_range[[1]][1]
+  end_date <- date_range[[1]][2]
+  spotify_charts_weekly_top_200$start_date[spotify_charts_weekly_top_200$Week == a] <- start_date
+  spotify_charts_weekly_top_200$end_date[spotify_charts_weekly_top_200$Week == a] <- end_date
+  spotify_charts_weekly_top_200$year <- as.numeric(substr(spotify_charts_weekly_top_200$end_date, 1,4))
+  
+  a <- a + 1
+}
+
+#remove Week column
+spotify_charts_weekly_top_200 = subset(spotify_charts_weekly_top_200, select = -c(Week))
+
+#remove all rows with empty Track Name or empty Artist Name
+spotify_charts_weekly_top_200 <- spotify_charts_weekly_top_200[!(is.na( spotify_charts_weekly_top_200$Track_Name) | spotify_charts_weekly_top_200$Track_Name=="" | spotify_charts_weekly_top_200$Artist_Name==""),]
+
+#get the Song IDs of unique songs from the charts
+uniqueSongID <- unique(spotify_charts_weekly_top_200$id)
+
+#populate audio features data frame
+first <- TRUE
+b <- 1
+for(i in uniqueSongID){
+  temp <- get_track_audio_features(id = i, authorization = access_token)
+  if(first){
+     audio_features <- temp
+     first <- FALSE
+  }
+  else{
+       audio_features <- rbind(audio_features, temp)
+  }
+  Sys.sleep(0.1)
+  b = b+1
+  print(b)
+
+}
+
+#remove unwanted columns
+audio_features = subset(audio_features, select = -c(uri, track_href, analysis_url, type))
+
+#move id to front
+audio_features <- audio_features %>% relocate(id)
+
+#combine audio features and weekly charts
+spotify_charts_weekly_top_200 <- spotify_charts_weekly_top_200  %>% 
+  left_join(audio_features, by = "id") %>% 
+  arrange(desc(end_date), Position)
+
+#save the final dataset as a new csv file
+#change destination directory as required
+
+write.csv(spotify_charts_weekly_top_200, "/Users/ichhit/Documents/DENISON/SEM 2/DA 101-02/LABS/FINAL_PROJECT/spotify_charts_weekly_top_200.csv", row.names = FALSE)
+
+```
+
+
+```{r Reading, message=FALSE, warning=FALSE, include=TRUE}
+
+#LOADING FINAL DATASET
+
+spotify_charts_weekly_top_200 <- read.csv("spotify_charts_weekly_top_200.csv")
+
+```
+
+---
+
+# 1. Introduction
+
+Spotify is the world's largest on-demand audio streaming subscription service that serves users with access to millions of songs from artists and podcasts across the globe. It has over 406 million monthly active users, out of which 180 million are paying subscribers (Spotify For the Record, 2022). With more than 82 million songs that are available in 180+ countries, Spotify has truly changed the means by which we interact with music(Spotify For the Record, 2022). With so much music available in one platform that dominates the music industry, the record labels and artists have to control the factors, if there are any, that could maximize their profits.
+
+In the past, music lovers would have to buy CDs and vinyls for a particular song or an album by an artist. So, even if they just wanted to listen to one or two songs, they'd have to buy the whole album CD. But now, with the power of streaming, people just have to buy a subscription to get access to any song at any given time from anywhere. Furthermore, before Spotify came to the limelight, music sharing sites like Limewire and Napster bred ground for illegal sharing of pirated songs for free. This caused a huge loss to the music industry. This problem was solved by Spotify, as it was a paid subscription, out of which, parts were paid to the record labels and artists.
+
+Spotify, being the leader of the music industry currently, has left artists and record labels to compete in maximizing their profit by getting more streams. The more streams a song has, the more successful the song can be considered. Spotify uses the number of streams as a metric to determine song popularity. Furthermore, it has a Spotify Global Top 200 Weekly Charts that gets posted on its spotify charts website every Friday. The chart contains 200 songs with the highest number of streams in that week over the globe. Currently, the website has data from 2016-12-23 to 2022-04-29 (over 279 weeks). The data from the chart will be used as the main source for my dataset. 
+
+For every song in Spotify, it also has a database of individual audio features of the song. In this project, I will be determining whether these audio features have any impact on the popularity of the song. The popularity of the song will be determined by the peak position of the song in the chart and the number of weeks the song spent in the chart.
+
+### Questions to Explore
+
+So, the goals of this project are to analyze trends in Spotify, how the top songs have changed from 2017 to present and studying factors that influence the Spotify Global Top 200 Weekly Charts. I will also look at what makes a hit on the Spotify Chart? Is it based on the features of the song like the tempo, time signature, key of the song, how positive or negative the emotion it expresses? Or is it based on what record label the song was released by? Then finally, I will make predictions for a newly released song’s peak rank and the number of weeks it might spend in the chart based on the analysis.
+
+
+---
+
+# 2. Ethical Considerations
+
+The dataset that I am using for the project has been made available by Spotify itself on their website. Since, I am working with a dataset regarding songs, I have access to the audio features of songs that are created by Spotify itself. I don't think there are any concerning consequences because the artists and record labels consent to that data being public when they put their song on Spotify. The stakeholders of this data are Spotify, artists, and record labels. The dataset has a lot of potential to benefit the stakeholders rather than harm them. Artists and record labels could analyze what factors lead to a hit song and can focus on those factors to maximise their profits.
+
+---
+
+# 3. Data Explanation and Exploration
+
+Initially, this is what the dataset looks like:
+
+```{r message=FALSE, warning=FALSE, include=TRUE}
+#get top 5 rows
+spotify_charts_weekly_top_200 %>% head(n=5)
+```
+
+The Position variable means the position in the chart for a particular week, it ranges from 1 to 200. We also have the track names, artist names, and the number of streams a song got that week. The songs can be individually identified by their song id and the week can be identified by the start and end dates. I also added a year variable for yearly analysis. Then, we have the individual audio features of a song.
+
+
+```{r message=FALSE, warning=FALSE, include=TRUE}
+#get just the audio features part
+audio_features = subset(spotify_charts_weekly_top_200, select = -c(Position,Streams,start_date,end_date,year, Track_Name, Artist_Name))
+
+#remove duplicates
+audio_features <- distinct(audio_features)
+```
+
+## Audio Features: 
+
+Here is a list of the audio features variable in the dataset (detailed explanation in the codebook):
+
+- **Danceability (0 to 1)**
+- **Energy (0 to 1)**
+- **Key (-1 to 11)**
+- **Loudness (in dB)**
+- **Mode (0 or 1)**
+- **Speechiness (0 to 1)**
+- **Acousticness (0 to 1)**
+- **Liveness (0 to 1)**
+- **Instrumentalness (0 to 1)**
+- **Valence (0 to 1)**
+- **Tempo (in bpm)**
+- **Duration (in ms)**
+- **Time Signature (¾ to 7/4)**
+
+I will be using some of these as predictor variables in the upcoming linear models.
+
+## Song Statistics
+```{r message=FALSE, warning=FALSE, include=TRUE}
+#get statistics for every unique song
+song_stats <- spotify_charts_weekly_top_200 %>% 
+  group_by(id, Track_Name, Artist_Name) %>% 
+  dplyr::summarize(Peak_Position = min(Position), 
+                   Number_of_Weeks=n(), 
+                   Total_Streams = sum(Streams))
+```
+The spotify_charts_weekly_top_200 dataset has over 55,000 rows, so it has a lot of duplicate songs in it. In order to analyze songs individually, unique songs were retrieved and some summary statistics were calculated. After that, we have 3 new variables, which are later going to be used as dependent variables for the models:
+
+- **Peak_Position**
+
+It is the highest rank a song achieves in the chart, which ranges from 1 to 200. It will help to track how popular a song was at that point of time.
+
+- **Number_of_Weeks**
+
+It is the maximum number of weeks a song survives in the chart, which ranges from 1 to 279. It helps to determine the intensity and length of the song’s popularity
+
+- **Total_Streams**
+
+It is the total number of streams a song has over the 279 weeks of data. It will be the actual metric to compare the popularity of songs. This value however doesn't account to the actual number of streams a song has because the dataset doesn't have number of streams from before 2017 and also, some songs may not have been in the chart for the full 279 weeks.
+
+
+## Exploring
+
+Here are some quick facts about the spotify charts that I found interesting while exploring the data: 
+I created a top 10 list of songs that had the songs with the highest number of streams in 1 particular week.
+
+```{r message=FALSE, warning=FALSE}
+#get top 10 rows based on descending number of streams
+
+top_10_songs_weekly_streams <- spotify_charts_weekly_top_200 %>% arrange(desc(Streams)) %>% 
+  head(n = 10)
+
+#create custom table 
+top_10_songs_weekly_streams %>% gt() %>%
+  tab_header(
+    title = "Top 10 Most-Streamed Songs in a Single Week",
+    subtitle = "From 2017 to 2022"
+  ) %>% cols_label(
+    Track_Name = "Song",
+    Artist_Name = "Artist",
+    start_date = "Start Week",
+    end_date = "End Week"
+  ) %>% fmt_number(
+    columns = Streams,
+    decimals = 0,
+    use_seps = TRUE
+  ) %>% 
+  tab_options(
+    table.background.color = "#191414",
+  ) %>%
+  tab_style(
+    style = list(
+      cell_fill(color = "#1DB954"),
+      cell_text(weight = "bold")
+      ),
+    locations = cells_body(
+      columns = c(start_date,end_date),
+      rows = Track_Name == "Easy On Me" | Track_Name == "As It Was" | Track_Name == "7 rings"
+    )) %>% 
+    tab_footnote(
+    footnote = "Green indicates release week.",
+    locations = cells_column_labels(
+      columns = start_date
+    )
+    )
+  
+```
+
+
+*Figure 1: In the above table, we can see the top 10 most streamed songs in a single week in the history of Spotify. The table includes the streams that a song got, the particular week and audio features.*
+
+The table shows that Easy On Me by Adele, with about 85 million  streams has the record for the highest number of streams in 1 week. It achieved that in its week of release.  
+
+Now, let's look at some of its variables to understand more about what made it a hit:
+
+
+```{r}
+#get features of Easy on Me by id
+audio_features %>% filter(id == "46IZ0fSY2mpAiktS3KOqds")
+```
+The song has a mid danceability value with pretty low energy. The key 5 and mode 1 corresponds to a scale of F Major. The song is played in an acoustic piano, so the value of acoustiness makes sense. Similarly, the song has vocals in it and is studio recorded, hence the low values of instrumentalness and liveness. If you have heard the song, it is a sad song, so, a low valence of 0.13 makes sense.
+
+
+Similarly, I made a list of the top 10 songs on Spotify based on the total streams over 279 weeks.
+
+```{r message=FALSE, warning=FALSE}
+
+#get top 10 songs based on descending number of streams
+top_10_songs_total_streams <- song_stats  %>% arrange(desc(Total_Streams)) %>% head(n = 10) %>% ungroup()
+
+#add record labels manually
+top_10_songs_total_streams$Record_Label <- c("Warner Music Group", "Universal Music Group","Warner Music Group", "Universal Music Group","Warner Music Group","Universal Music Group","Universal Music Group","Sony Music Entertainment","Universal Music Group","Sony Music Entertainment")
+
+#create custom table
+top_10_songs_total_streams %>% gt() %>%
+  tab_header(
+    title = "Top 10 Most-Streamed Songs Overall",
+    subtitle = "From 2017 to 2022"
+  ) %>% cols_label(
+    Track_Name = "Song",
+    Artist_Name = "Artist",
+    Peak_Position = "Peak Position",
+    Number_of_Weeks = "Number of Weeks",
+    Total_Streams = "Total Streams",
+    Record_Label = "Record Label"
+  ) %>% fmt_number(
+    columns = Total_Streams,
+    decimals = 0,
+    use_seps = TRUE
+  ) %>% 
+  tab_options(
+    table.background.color = "#191414",
+  )
+
+```
+
+*Figure 2: In the above table, we can see the top 10 most streamed songs overall in the history of Spotify. The table includes the streams that a song got, peak position in the chart, maximum number of weeks spent in the chart, and the record label that the artist was associated with.*
+
+The table shows that Shape of You by Ed Sheeran, with about 3 billion streams has the record for the highest number of streams overall. The song has a peak position of 1 and it spent 274 weeks out of 279 weeks in the chart, which is pretty impressive. So, Shape of You can be considered a massive hit. Record labels and artist would consider that as ideal statistics in order to maximize their profits. 
+
+I added the record labels that the artist is associated manually as I couldn't automate the values for all 5150 songs. Doing that helped me to realize that all of the artists in the list are associated with the big 3 record labels in the world. They are Universal Music Group, Sony Music Entertainment, and Warner Music Group. The amount of success makes complete sense as having such big labels backing your song, suggests that the song has potential to do well due to high budget and great marketing promotions.
+
+So, I analyzed some of its variables in order to make assumptions about what truly makes a hit:
+
+
+```{r}
+#get features of Shape of You by id
+audio_features %>% filter(id == "7qiZfU4dY1lWllzX7mPBI3")
+```
+The song has a high danceability value of 0.825 with pretty high energy of 0.652. The key 1 and mode 0 corresponds to a scale of C# Minor. Similarly, the song has vocals in it and is studio recorded, hence the low values of instrumentalness and liveness. Shape of You is a pretty happy, feel-good dace music and the high value of valence further supports it.
+
+
+Similarly, I created summary statistics for artists as well. This one has the peak position and the maximum number of weeks in the chart and also the number of song an artist has in the charts.
+
+
+```{r message=FALSE, warning=FALSE, include=TRUE}
+#get statistics for every unique artist
+artist_stats <- song_stats %>% 
+  group_by(Artist_Name) %>% 
+  dplyr::summarize(Total_Artist_Streams = sum(Total_Streams), 
+                   Number_of_Songs = n(), 
+                   Peak_Position = min(Peak_Position), 
+                   Max_Number_of_Weeks = max(Number_of_Weeks))
+```
+
+Here's a list of top 10 artists on Spotify based on total number of streams overall.
+
+```{r message=FALSE, warning=FALSE}
+#get top 10 artists based on streams
+top_10_artists <-  artist_stats %>% arrange(desc(Total_Artist_Streams)) %>% head(n = 10) %>% ungroup()
+
+#create custom table
+top_10_artists %>% gt() %>%
+  tab_header(
+    title = "Top 10 Most-Streamed Artists",
+    subtitle = "From 2017 to 2022"
+  ) %>% cols_label(
+    Artist_Name = "Artist",
+    Peak_Position = "Peak Position",
+    Number_of_Songs = "Number of Songs",
+    Total_Artist_Streams = "Total Streams",
+    Max_Number_of_Weeks = "Max Number of Weeks"
+  ) %>% fmt_number(
+    columns = Total_Artist_Streams,
+    decimals = 0,
+    use_seps = TRUE
+  ) %>% 
+  tab_options(
+    table.background.color = "#191414",
+  )
+
+
+```
+
+*Figure 3: In the above table, we can see the top 10 artists based on total song streams in the history of Spotify. The table includes the streams that an artist got, peak position in the chart, maximum number of weeks spent in the chart, and the number of songs in the chart.*
+
+Looking at the table, we can see that Post Malone, with about 14.7 billion streams has the most number of artist streams. Ed Sheeran is pretty close with 14.2 billion streams and he wins in terms of the maximum number of weeks spent in the chart. Drake has the most number of hits with 118 songs in the chart. The table shows us the most successful artists currently. So, if any of these artists release a new song, the song is most likely going to be a hit as they have a large fan base and are great artists.
+
+```{r message=FALSE, warning=FALSE, include=TRUE}
+#combine song statistics with the audio features
+Spotify_Charts_Top_Weekly_Songs <- song_stats  %>% 
+  left_join(audio_features, by = "id") %>% 
+  arrange(Artist_Name)
+
+```
+
+
+## Analyzing Trends
+
+Next, I analyzed some trends of some of the audio features over the years.
+
+
+```{r}
+
+#get summary statistics by year
+yearly_features <- spotify_charts_weekly_top_200 %>% group_by(year) %>% 
+  dplyr::summarize(Yearly_Tempo = mean(tempo), Yearly_Valence = mean(valence))
+
+#plot graph of average tempo by year
+ggplot(yearly_features, aes(x = year, y = Yearly_Tempo, group = 1)) +
+geom_line(color="green") + geom_point()+labs(x="Year", y="Average Song Tempo (in bpm)", title = "Average Song Tempo over the years") + theme_minimal() +  theme(plot.title=element_text(hjust=0.5))
+
+```
+
+*Figure 4: In the above figure, point plots are made with year on the x-axis and the average song tempo (in bpm) on the y-axis. *
+
+We can see that over the years the tempo of an average song on the chart has been fairly close 120 to 121 bpm, which is kind of fast. From 2021 to 2022, the tempo has seen a spike of increase.
+
+
+```{r}
+#plot graph of average song valence by year
+ggplot(yearly_features, aes(x = year, y = Yearly_Valence, group = 1)) +
+geom_line(color="green") + geom_point()+labs(x="Year", y="Average Valence", title = "Average Song Valence over the years") + theme_minimal() +  theme(plot.title=element_text(hjust=0.5))
+
+```
+
+*Figure 5: In the above figure, point plots are made with year on the x-axis and the average song valence (0 to 1) on the y-axis. *
+
+Similarly, the valence of an average song in the chart is seen to be around 0.5. So, the songs are pretty neutral in terms of positivity. After 2020, the valence had increased for a while. Since it was during the pandemic, artists were trying to make happier songs to cheer people up.
+
+
+```{r}
+
+#plot bar chart of key of song
+ggplot(data = Spotify_Charts_Top_Weekly_Songs , aes(x=key)) + geom_bar() +labs(x="Key", y="Number of Songs", title = "Number of songs by key") + theme_minimal() +  theme(plot.title=element_text(hjust=0.5))  + geom_text(
+    stat = "count",
+    aes(label = ..count..),
+   vjust = -0.5
+  )
+```
+
+*Figure 6: In the above figure, bar chart is made with key of the song on the x-axis (0-12) and the number of songs on the y-axis.*
+
+We can see that the key of 1, which translates to a key of C#, is the most popular song key in the charts, with 759 out of 5150 songs being in that key. Indeed, Shape of You was also in that key.
+
+```{r}
+#plot histogram of danceability
+ggplot(Spotify_Charts_Top_Weekly_Songs , aes(x=danceability)) + geom_histogram(bins = 25) + labs(x="Danceability", y= "Number of songs", title = "Histogram of danceability of the Spotify Top Weekly songs from 2017 to present") + theme_minimal()
+
+```
+
+*Figure 7: In the above figure, a histogram is made with danceability of the song on the x-axis (0-1) and the number of songs on the y-axis.*
+
+Observing the figure, we can see that most of the songs have a danceability value of more than 0.5. This suggests that if the song is more danceable, it is more likely to perform well in the charts.
+
+So, based on Shape of You and other above song explorations I had the following intial assumptions about what factors could make a song hit. I have assumed that the peak position and the number of weeks variables might depend on some of the audio features. 
+
+I feel like songs with the following attributes might perform better:
+
+- High value of danceability and valence and mild energetic value, as people tend to like feel-good happy songs that make them dance.
+
+- Mode of 1 representing a major scale, as it makes the song feel happy and bright.
+
+- Low value of instrumentalness, as instrumental songs are lesser popular.
+
+- Low value of liveness, as studio recordings are more superior and higher quality.
+
+- A song with a key of 1 (C♯/D♭) might perform better, given that it is the most popular key.
+
+---
+
+# 4. Statistical Analysis and Interpretation
+
+## Yearly Streaming Trend
+
+```{r}
+#get yearly data
+spotify_charts_yearly <- spotify_charts_weekly_top_200 %>% 
+  group_by(year) %>% 
+  dplyr::summarize(Yearly_Streams = sum(Streams)/1000000000) %>% filter(year > 2016 & year < 2022)
+
+#plot graph of year against total streams
+ggplot(spotify_charts_yearly, aes(x = year, y = Yearly_Streams, group = 1)) +
+geom_line(color="green") + geom_point()+labs(x="Year", y="Total Streams (in billions)", title = "Total Top 200 Global Weekly Spotify Streams from 2017 to 2021") + theme_minimal() +  theme(plot.title=element_text(hjust=0.5))
+
+```
+
+*Figure 8: In the above figure, point plots are made with year on the x-axis and the total number of streams(in billions) on the y-axis. *
+
+We can see that the number of total streams in Spotify has been steadily increasing over the years. It had less than 80 billion total streams based on the charts in 2017 and in 2021, it went up to 100 billion streams. This suggests that Spotify is getting more popular due to more engagement and interactions.
+
+We will further verify whether an average song in 2021 has higher number of streams than a song in 2020 by a t-test below:
+
+```{r}
+#get 2020 data
+spotify_charts_2020 <- spotify_charts_weekly_top_200 %>% filter(year == 2020)
+#get 2021 data
+spotify_charts_2021 <- spotify_charts_weekly_top_200 %>% filter(year == 2021)
+
+#generate t-test
+pander(t.test(spotify_charts_2020$Streams, spotify_charts_2021$Streams))
+
+```
+
+*Figure 9: In the above figure, a t-test is conducted to compare means of average stream of a song in 2020 vs in 2021. *
+
+
+The t-test further solidifies the previous graph. The p-value is very significant, as it is less than alpha of 0.05. The 95% Confidence Interval doesn't have 0 in the range. Also, we can see that an average song in 2020 had 9.1 million streams and an average song in 2021 had 9.4 million streams. So, yes, the number of streams has increased over the years.
+
+
+## Constructing Linear Models
+
+We will use Peak_Position and the Number_of_Weeks as the dependent variables in our models.
+
+I will use the following variables as the predictors based on my initial assumptions:
+- danceability, 
+- speechiness, 
+- valence, 
+- instrumentalness,
+- key,
+- energy,
+- mode,
+- liveness
+
+
+### Creating initial model
+
+```{r}
+
+#creating a model from Spotify_Charts_Top_Weekly_Songs with Peak_Position as the dependent variable and danceability + speechiness + valence + instrumentalness+ key + energy + mode + liveness as independent variables.
+mod10 <- lm(Peak_Position ~ danceability + speechiness + valence + instrumentalness+ key + energy + mode + liveness, Spotify_Charts_Top_Weekly_Songs)
+
+#view as table
+pander(summary(mod10))
+
+```
+
+*Figure 10: In the above figure, a summary of the linear model from Spotify_Charts_Top_Weekly_Songs with Peak_Position as the dependent variable and danceability + speechiness + valence + instrumentalness+ key + energy + mode + liveness as independent variables, is shown *
+
+Here, we are looking at the relationship between the peak position of a song and the above listed audio features. To come to a conclusion, we need to look at some of the values. To make it easier, I will only look at the values for the variables that have p-value less than 0.05 as the rest aren't that significant. Those variables are danceability, speechiness, instrumentalness, and energy.
+
+The estimate for intercept of danceability shows a value of -13.4569 with a small p-value of  0.031700. The estimate shows that for every increase of danceability, the model predicts a peak position decrease of -13.4569. This is further solidified by the p-value of 0.031700 which is less than our significance level of 0.05. 
+
+The estimate for intercept of speechiness shows a value of 16.6052 with a small p-value of 0.020651. The estimate shows that for every increase of speechiness, the model predicts a peak position increase of 16.6052. This is further solidified by the p-value of 0.020651 which is less than our significance level of 0.05.
+
+The estimate for intercept of instrumentalness shows a value of 28.9582 with a small p-value of 0.012624. The estimate shows that for every increase of instrumentalness, the model predicts a peak position increase of 28.9582 . This is further solidified by the p-value of 0.012624 which is less than our significance level of 0.05. 
+
+The estimate for intercept of energy shows a value of 19.8055 with a small p-value of 0.000262. The estimate shows that for every increase of energy, the model predicts a peak position increase of  19.8055. This is further solidified by the p-value of 0.000262 which is less than our significance level of 0.05. 
+
+Then, finally if we look at the Multiple R-squared, it is 0.7338%. This means that the model accounts for 0.7338% of the variance in the data, which is a pretty low value. So, it suggests that using all the variables isn't a good idea.
+
+Thus, we exclude all the variables that don't p-value less than 0.05 and try building a final model.
+
+So, the predictors are:
+- Danceability
+- Speechiness
+- Instrumentalness
+- Energy
+
+Now, we check for any correlation between them: 
+
+```{r}
+#check for collinearity between predictor variables
+ggpairs(Spotify_Charts_Top_Weekly_Songs, columns=c("danceability", "speechiness", "instrumentalness", "energy"))
+```
+
+*Figure 11: In the above figure, collinearity between the 4 variables is shown. *
+
+Here, I check the collinearity between the 4 variables that I have chosen. If the correlation coefficient gives a value of more than +-0.40, I shall reject the variable for using it in our model as it may skew our results a lot. Analyzing the results, all the correlation values are acceptable as none of them are greater than 0.4 or less than -0.4. So, all these 4 variables will used in the final model.
+
+
+### Linear Model 0
+
+Now, we create a final model for the Peak_Position model based on the above evidences.
+
+```{r}
+#creating a model from Spotify_Charts_Top_Weekly_Songs with Peak_Position as the dependent variable and danceability + speechiness + valence + instrumentalness as independent variables.
+mod0 <- lm(Peak_Position ~ danceability + speechiness + instrumentalness + energy, Spotify_Charts_Top_Weekly_Songs)
+
+#view as table
+pander(summary(mod0))
+
+```
+
+*Figure 12: Shows linear model 0 summary from Spotify_Charts_Top_Weekly_Songs with Peak_Position as the dependent variable and danceability + speechiness + valence + instrumentalness as independent variables.*
+
+Here, we are looking at the relationship between the peak position of a song and the above listed audio features. To come to a conclusion, we need to look at some of the values.
+
+The estimate for intercept of danceability shows a value of -12.06 with a small p-value of 0.041. The estimate shows that for every increase of danceability, the model predicts a peak position decrease of 12.06. This is further solidified by the p-value of 0.041 which is less than our significance level of 0.05. 
+
+The estimate for intercept of speechiness shows a value of 16.47 with a small p-value of 0.02103 . The estimate shows that for every increase of speechiness, the model predicts a peak position increase of 16.47. This is further solidified by the p-value of 0.02103 which is less than our significance level of 0.05.
+
+The estimate for intercept of instrumentalness shows a value of 27.52 with a small p-value of 0.0175. The estimate shows that for every increase of instrumentalness, the model predicts a peak position increase of 27.52. This is further solidified by the p-value of 0.0175 which is less than our significance level of 0.05. 
+
+The estimate for intercept of energy shows a value of 22.43 with a small p-value of 0.000262. The estimate shows that for every increase of energy, the model predicts a peak position increase of 22.43. This is further solidified by the p-value of 0.000262 which is less than our significance level of 0.05. 
+
+Then, finally if we look at the Multiple R-squared, it is 0.5982%. This means that the model accounts for 0.5982% of the variance in the data, which is a pretty low value. So, the model is pretty bad for predicting accurately.
+
+### Linear Model 1
+
+Now, we do the same for the Number_of_Weeks dependent variable and use the following predictors:
+
+- Danceability
+- Speechiness
+- Valence
+- Liveness
+
+```{r}
+#creating a model from Spotify_Charts_Top_Weekly_Songs with Number_of_Weeks as the dependent variable and danceability + speechiness + valence + liveness as independent variables.
+mod1 <- lm(Number_of_Weeks ~ danceability + speechiness + valence + liveness, Spotify_Charts_Top_Weekly_Songs)
+
+#view as table
+pander(summary(mod1))
+
+```
+
+*Figure 13: Shows linear model 1 summary from Spotify_Charts_Top_Weekly_Songs with Number_of_Weeks as the dependent variable and danceability + speechiness + valence + liveness as independent variables.*
+
+Here, we are looking at the relationship between the number of weeks a song spent in the chart and the above listed audio features. To come to a conclusion, we need to look at some of the values.
+
+The estimate for intercept of danceability shows a value of 4.924 with a small p-value of 0.01586 . The estimate shows that for every increase of danceability, the model predicts a peak position increase of 4.924. This is further solidified by the p-value of 0.01586  which is less than our significance level of 0.05. 
+
+The estimate for intercept of speechiness shows a value of -12.97  with a small p-value of 3.179e-08 . The estimate shows that for every increase of speechiness, the model predicts a peak position decrease of 12.97. This is further solidified by the p-value of 3.179e-08 which is less than our significance level of 0.05.
+
+The estimate for intercept of valence shows a value of 2.759 with a small p-value of 0.02876 . The estimate shows that for every increase of valence, the model predicts a peak position increase of 2.759. This is further solidified by the p-value of 0.02876 which is less than our significance level of 0.05. 
+
+The estimate for intercept of liveness shows a value of -5.522 with a small p-value of 0.00478. The estimate shows that for every increase of liveness, the model predicts a peak position decrease of 5.522. This is further solidified by the p-value of 0.00478 which is less than our significance level of 0.05. 
+
+Then, finally if we look at the Multiple R-squared, it is 1.015%. This means that the model accounts for 1.015% of the variance in the data, which is a pretty low value. So, the model is also pretty bad for predicting accurately.
+
+
+### Linear Model 2
+
+Since, both previous models were bad, I thought of making a third linear model with Number of Weeks and Peak Position as the predictor variables to predict the total number of streams a song could get.
+
+First, we check for correlation between the predictor variables:
+
+```{r}
+#correlation test as table
+pander(cor.test(Spotify_Charts_Top_Weekly_Songs$Number_of_Weeks, Spotify_Charts_Top_Weekly_Songs$Peak_Position))
+
+```
+
+*Figure 14: Shows correlation between Number of Weeks and Peak Position.*
+
+The above table suggests that the correlation of -0.4113 is less than our significance level of +- 0.5. So, I can use them in a model together. This is further solidified by the p-value which is less than 0.05.
+
+So, now, we create a third model with Peak_Position and Number_of_Weeks as the predictor variables to predict the Total Number of Streams of a song.
+
+
+```{r}
+#creating a model from Spotify_Charts_Top_Weekly_Songs with Total_Streams as the dependent variable and Peak_Position and Number_of_Weeks as independent variables.
+mod2 <- lm(Total_Streams ~ Number_of_Weeks + Peak_Position, Spotify_Charts_Top_Weekly_Songs)
+
+#view as table
+pander(summary(mod2))
+
+```
+
+*Figure 15: Shows linear model 2 summary from Spotify_Charts_Top_Weekly_Songs with Total_Streams as the dependent variable and Number_of_Weeks and Peak_Position as independent variables.*
+
+Here, we are looking at the relationship between the total streams of a song and peak position and number of weeks. To come to a conclusion, we need to look at some of the values.
+
+The estimate for intercept of Number_of_Weeks shows a value of 8574620 with a small p-value of < 2e-16. The estimate shows that for every one week increase in number of weeks, the model predicts a total streams increase of 8574620 streams. This is further solidified by the p-value of  < 2e-16 which is less than our significance level of 0.05. 
+
+The estimate for intercept of Peak_Position shows a value of -343720 with a small p-value of  < 2e-16. The estimate shows that for every one position increase of peak position, the model predicts a peak position decrease of 343720 streams. This is further solidified by the p-value of < 2e-16 which is less than our significance level of 0.05.
+
+Then, finally if we look at the Multiple R-squared, it is 83.86%. This means that the model accounts for 83.86% of the variance in the data, which is a pretty significant value. So, this model is a great predicting model.
+
+
+```{r}
+ggplot(data = Spotify_Charts_Top_Weekly_Songs, aes(x=mod2$residuals)) + geom_histogram(bins = 10) + labs(x= "Residuals from model 2", y = "Frequency", title = "Histogram of model 2 residuals")
+
+```
+
+*Figure 16: Shows histogram of residuals of model 2*
+
+We can see that the residuals are centered around 0. So, model 2 is pretty good.
+
+## Making Predictions
+
+Now, we use the models to predict for Harry Styles' latest smash hit song "As It Was".
+
+
+```{r}
+# get row of As It Was
+Spotify_Charts_Top_Weekly_Songs %>% filter(id == "4LRPiXqCikLlN15c3yImP7")
+
+```
+
+We use the exact audio features value of the song to predict the number of weeks, peak position, and the total number of streams for the song and compare it with what actually happened:
+
+```{r}
+#create sample data frame for as it was 
+asItWas1 <- data.frame(danceability = 0.52, speechiness = 0.0557, energy = 0.731, instrumentalness = 0.00101)
+
+#predict peak position
+pander(predict(mod0, asItWas1, interval = "confidence"))
+
+```
+
+Model 0 predicts that according to the audio features, As It Was will have a peak position of 89, with a 95% confidence interval of 86 to 92. 
+
+But, in reality, the song peaked at number 1.
+
+So, the model 0 failed to predict accurately.
+
+
+```{r}
+#create sample data frame for as it was 
+asItWas2 <- data.frame(danceability = 0.52, speechiness = 0.0557, valence = 0.662, liveness = 0.311)
+
+#predict number of weeks
+pander(predict(mod1, asItWas2, interval = "confidence"))
+
+```
+
+Model 1 predicts that according to the audio features, As It Was will spend 10.69 weeks in the charts, with a 95% confidence interval of 9.57 to 11.82. Till it's release, As It Was has spent 4 weeks in the charts. So, according to the model it will only last there for 10 weeks.
+
+But, in reality, the song is doing really well in the charts. So, it is highly unlikely that it'll just spend 10 weeks in total in the charts.
+
+
+```{r}
+#create sample data frame for as it was 
+newVals2 <- data.frame(Number_of_Weeks = 4, Peak_Position = 1)
+
+#predict total streams
+pander(predict(mod2, newVals2, interval = "confidence"))
+
+```
+
+Now, we predict what the total number of streams should be according to its peak position and number of weeks value. The model predicts that As It Was should have at least a total streams of 63,393,560 by now. The 95% confidence interval ranges from 59,101,855 to 67,685,265.
+
+But, in reality, As It Was has a total streams of 276,454,584, which means that the song did exceedingly well in the charts. The song is a super hit.
+
+---
+
+# 5. Conclusions
+
+What I learned from this analysis is that it is very hard to predict the success of a song just based off of the audio features. I feel like there is no clear formula to make a hit. It is because music is purely subjective. No matter how perfect the song is, it is up to the audience to make it a hit or not. Due to the unpredictable nature of people and change in trends, it is very hard to predict the popularity of a song.
+
+Also, there were a few drawbacks in my dataset. The dataset only includes songs that made it in the charts. So, if I had a more diverse dataset that had songs not in the charts, maybe separating hits from regular songs would be easier. Furthermore, including more variables like gender of the artist, genre, record labels, and language of song, would help better understand the popularity of songs.
+I feel like more than the audio features, other external factors like record label association, promotion, guest artists features, lyrics, and melody play more important roles in determining a hit. So, if record labels did more analysis and research on those factors, maybe we could improve our model. But, in the end, music is subjective and the fact that it is almost impossible to predict or formulate a hit song is what makes music beautiful.
+
+
+---
+
+
+# 6. Reference List
+
+<a href="https://newsroom.spotify.com/company-info/">"Company Info"</a>. Spotify For the Record. 2 February 2022. Retrieved 2 February 2022.
+
+
+---
+
+<section id='dataset'>
+# 7. Final Datasets
+
+### spotify_charts_weekly_top_200.csv
+```{r}
+#dataset
+spotify_charts_weekly_top_200
+
+```
+
+### Spotify_Charts_Top_Weekly_Songs
+```{r}
+Spotify_Charts_Top_Weekly_Songs
+```
+
+### artist_stats
+```{r}
+artist_stats
+
+```
