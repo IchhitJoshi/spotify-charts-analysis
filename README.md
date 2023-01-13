@@ -39,3 +39,43 @@ The dataset that I am using for the project has been made available by Spotify i
 
 Initially, this is what the dataset looks like:
 
+<img width="1413" alt="image" src="https://user-images.githubusercontent.com/112485986/212206658-8d033f65-4822-4088-bf54-e38aaceb1ca8.png">
+
+<img width="1413" alt="image" src="https://user-images.githubusercontent.com/112485986/212206683-05935dad-79ef-4ba6-9681-9c21c81a0c47.png">
+
+The Position variable means the position in the chart for a particular week, it ranges from 1 to 200. We also have the track names, artist names, and the number of streams a song got that week. The songs can be individually identified by their song id and the week can be identified by the start and end dates. I also added a year variable for yearly analysis. Then, we have the individual audio features of a song.
+
+## Audio Features: 
+
+Here is a list of the audio features variable in the dataset (detailed explanation in the codebook):
+
+- **Danceability (0 to 1)**
+- **Energy (0 to 1)**
+- **Key (-1 to 11)**
+- **Loudness (in dB)**
+- **Mode (0 or 1)**
+- **Speechiness (0 to 1)**
+- **Acousticness (0 to 1)**
+- **Liveness (0 to 1)**
+- **Instrumentalness (0 to 1)**
+- **Valence (0 to 1)**
+- **Tempo (in bpm)**
+- **Duration (in ms)**
+- **Time Signature (¾ to 7/4)**
+
+I will be using some of these as predictor variables in the upcoming linear models.
+
+The spotify_charts_weekly_top_200 dataset has over 55,000 rows, so it has a lot of duplicate songs in it. In order to analyze songs individually, unique songs were retrieved and some summary statistics were calculated. After that, we have 3 new variables, which are later going to be used as dependent variables for the models:
+
+- **Peak_Position**
+
+It is the highest rank a song achieves in the chart, which ranges from 1 to 200. It will help to track how popular a song was at that point of time.
+
+- **Number_of_Weeks**
+
+It is the maximum number of weeks a song survives in the chart, which ranges from 1 to 279. It helps to determine the intensity and length of the song’s popularity
+
+- **Total_Streams**
+
+It is the total number of streams a song has over the 279 weeks of data. It will be the actual metric to compare the popularity of songs. This value however doesn't account to the actual number of streams a song has because the dataset doesn't have number of streams from before 2017 and also, some songs may not have been in the chart for the full 279 weeks.
+
