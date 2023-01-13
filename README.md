@@ -79,3 +79,15 @@ It is the maximum number of weeks a song survives in the chart, which ranges fro
 
 It is the total number of streams a song has over the 279 weeks of data. It will be the actual metric to compare the popularity of songs. This value however doesn't account to the actual number of streams a song has because the dataset doesn't have number of streams from before 2017 and also, some songs may not have been in the chart for the full 279 weeks.
 
+Here are some figures and graphs of my exploration of the project:
+
+<img width="1281" alt="Screen Shot 2022-04-26 at 7 49 37 AM" src="https://user-images.githubusercontent.com/112485986/212208489-5163b4e2-702d-40ff-823a-4c43fbefe90a.png">
+<img width="1279" alt="Top 10 Most-Streamed Artists" src="https://user-images.githubusercontent.com/112485986/212208493-bd5faba2-153e-4e26-ad21-0974f20219dc.png">
+<img width="1281" alt="Top 10 Most-Streamed Songs in a Single Week" src="https://user-images.githubusercontent.com/112485986/212208494-c83ded60-0d61-47f3-91ce-ea31fdc3d24d.png">
+<img width="1281" alt="Top 10 Most-Streamed Songs Overall" src="https://user-images.githubusercontent.com/112485986/212208495-9f3f9550-69e3-4ae6-b00e-3368a51dd791.png">
+![Total Top 200 Global Weekly Spotify Streams from 2017 to 2021](https://user-images.githubusercontent.com/112485986/212208632-e79f7a29-0cdc-4ee4-856f-ca9b21d6b756.png)
+
+
+
+
+
